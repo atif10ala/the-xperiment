@@ -1,18 +1,22 @@
 import streamlit as st
-import http.client
-import json
+from google import genai
+from google.genai import types
 import re
 from datetime import datetime
 
 # ==============================================================================
-# CORE SETUP & INTEGRATION
+# CORE SETUP & INTEGRATION (OFFICIAL SDK PLATFORM)
 # ==============================================================================
 
-API_KEY = "AQ.Ab8RN6IoXLxuInnMJqVshvfm2yvpZsd7zsgSeWISfzxBL2ecMA"
+# Safely pulling the dynamic AQ key from the Streamlit Private Configuration
+if "GEMINI_API_KEY" in st.secrets:
+    API_KEY = st.secrets["GEMINI_API_KEY"]
+else:
+    API_KEY = "NOT_SET"
 
-GEMINI_HOST = "generativelanguage.googleapis.com"
+# Initializing the official Google Client framework
+client = genai.Client(api_key=API_KEY)
 GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_PATH = f"/v1beta/models/{GEMINI_MODEL}:generateContent?key={API_KEY}"
 
 SYSTEM_PROMPT = """You are a brutal, official IELTS examiner with 20 years of experience marking IELTS Writing scripts under strict band descriptors. You do not flatter the candidate. You assess exactly as the real IELTS band descriptors require: Task Achievement/Response, Coherence and Cohesion, Lexical Resource, and Grammatical Range and Accuracy.
 
@@ -54,51 +58,32 @@ Scores must be valid IELTS band scores in increments of 0.5 (e.g. 5.0, 5.5, 6.0,
 # ==============================================================================
 
 def call_gemini(task_type: str, target_band: float, essay_text: str) -> str:
-    """Calls the Gemini API using http.client and returns the raw text response."""
+    """Calls the Gemini API using the official Google GenAI SDK framework."""
+    if API_KEY == "NOT_SET":
+        raise RuntimeError("🔑 API Key is missing. Please populate the GEMINI_API_KEY value inside your Streamlit Secret Console.")
+
     user_prompt = (
         f"IELTS Task Type: {task_type}\n"
         f"Candidate Target Band Score: {target_band}\n\n"
         f"Essay to mark:\n\"\"\"\n{essay_text}\n\"\"\""
     )
 
-    payload = {
-        "system_instruction": {
-            "parts": [{"text": SYSTEM_PROMPT}]
-        },
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": user_prompt}]
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.4,
-            "maxOutputTokens": 4096
-        }
-    }
-
-    conn = http.client.HTTPSConnection(GEMINI_HOST, timeout=60)
-    headers = {"Content-Type": "application/json"}
-
     try:
-        conn.request("POST", GEMINI_PATH, body=json.dumps(payload), headers=headers)
-        response = conn.getresponse()
-        raw_data = response.read().decode("utf-8")
-        status = response.status
-        conn.close()
+        # The official SDK passes configuration tokens cleanly to prevent service blocks
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                temperature=0.4,
+                max_output_tokens=4096
+            ),
+        )
+        if not response.text:
+            raise RuntimeError("Received an empty response from the backend framework.")
+        return response.text
     except Exception as e:
-        raise RuntimeError(f"Network error while contacting Gemini API: {e}")
-
-    if status != 200:
-        raise RuntimeError(f"Gemini API returned status {status}: {raw_data}")
-
-    try:
-        parsed = json.loads(raw_data)
-        text_output = parsed["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError, json.JSONDecodeError) as e:
-        raise RuntimeError(f"Could not parse Gemini API response: {e}\nRaw response: {raw_data}")
-
-    return text_output
+        raise RuntimeError(f"Google Authorization Link Error: {e}")
 
 
 # ==============================================================================
@@ -297,255 +282,3 @@ PREMIUM_CSS = """
         color: #38bdf8;
         font-weight: 800;
         font-size: 1.3rem;
-    }
-    .history-meta {
-        color: #94a3b8;
-        font-size: 0.85rem;
-    }
-
-    /* ---- Section divider label ---- */
-    .section-label {
-        color: #38bdf8;
-        font-weight: 700;
-        font-size: 0.95rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-bottom: 0.4rem;
-    }
-
-    /* ---- Misc cleanup ---- */
-    [data-testid="stExpander"] {
-        background-color: #11161d;
-        border-radius: 10px;
-        border: 1px solid rgba(148, 163, 184, 0.15);
-    }
-</style>
-"""
-
-st.markdown(PREMIUM_CSS, unsafe_allow_html=True)
-
-
-# ==============================================================================
-# SESSION STATE INITIALIZATION
-# ==============================================================================
-
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-if "last_result" not in st.session_state:
-    st.session_state.last_result = None
-
-if "last_task_type" not in st.session_state:
-    st.session_state.last_task_type = None
-
-
-# ==============================================================================
-# HERO HEADER
-# ==============================================================================
-
-st.markdown(
-    """
-    <div class="ielts-hero">
-        <h1>🎓 IELTS AI Tutor <span class="accent">Pro</span></h1>
-        <p>Brutal, examiner-grade feedback powered by Gemini 2.5 Flash — built for candidates who want the <span class="accent">real</span> score, not a comforting one.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# ==============================================================================
-# SIDEBAR CONTROLS
-# ==============================================================================
-
-with st.sidebar:
-    st.markdown("## ⚙️ Exam Configuration")
-    st.markdown("---")
-
-    task_type = st.selectbox(
-        "IELTS Task Type",
-        options=["Task 1 Academic", "Task 1 General", "Task 2 Essay"],
-        index=2,
-        help="Select the writing task category your essay belongs to.",
-    )
-
-    target_band = st.slider(
-        "🎯 Target Band Score",
-        min_value=5.0,
-        max_value=9.0,
-        value=7.0,
-        step=0.5,
-        help="The band score you are aiming to achieve.",
-    )
-
-    st.markdown("---")
-    st.markdown(
-        f"""
-        <div style="font-size: 0.85rem; color: #94a3b8;">
-            Current Task: <span style="color:#38bdf8; font-weight:700;">{task_type}</span><br>
-            Target Band: <span style="color:#38bdf8; font-weight:700;">{target_band}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("---")
-    st.markdown(
-        """
-        <div style="font-size: 0.78rem; color: #64748b;">
-            Model: gemini-2.5-flash<br>
-            Mode: Strict Examiner
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# ==============================================================================
-# MAIN TABS
-# ==============================================================================
-
-tab1, tab2, tab3 = st.tabs(
-    ["📝 Essay Evaluation", "💡 Vocabulary Upgrades", "📊 Session History"]
-)
-
-# ------------------------------------------------------------------------
-# TAB 1: ESSAY EVALUATION
-# ------------------------------------------------------------------------
-with tab1:
-    st.markdown('<div class="section-label">Paste Your Essay Below</div>', unsafe_allow_html=True)
-
-    essay_text = st.text_area(
-        label="Essay Input",
-        height=280,
-        placeholder="Paste your full IELTS essay response here...",
-        label_visibility="collapsed",
-    )
-
-    col_btn, col_count = st.columns([1, 3])
-    with col_btn:
-        analyze_clicked = st.button("🚀 Analyze Essay", use_container_width=True)
-    with col_count:
-        word_count = len(essay_text.split()) if essay_text else 0
-        st.markdown(
-            f"<div style='padding-top: 0.6rem; color: #94a3b8;'>Word count: <span style='color:#38bdf8; font-weight:700;'>{word_count}</span></div>",
-            unsafe_allow_html=True,
-        )
-
-    if analyze_clicked:
-        if not essay_text or not essay_text.strip():
-            st.warning("⚠️ Please paste an essay before requesting an analysis.")
-        elif API_KEY == "YOUR_GEMINI_API_KEY_HERE":
-            st.error("🔑 Please set your Gemini API_KEY at the top of app.py before using the analyzer.")
-        else:
-            with st.spinner("🧐 The examiner is reading your essay closely... grading rigorously..."):
-                try:
-                    raw_response = call_gemini(task_type, target_band, essay_text)
-                    result = parse_gemini_response(raw_response)
-                    st.session_state.last_result = result
-                    st.session_state.last_task_type = task_type
-
-                    st.session_state.history.append(
-                        {
-                            "title": f"{task_type} Submission",
-                            "task_type": task_type,
-                            "target_band": target_band,
-                            "overall": result["overall"],
-                            "grammar": result["grammar"],
-                            "vocab": result["vocab"],
-                            "cohesion": result["cohesion"],
-                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        }
-                    )
-                    st.success("✅ Analysis complete. Scroll down for your scorecard.")
-                except RuntimeError as e:
-                    st.error(f"❌ Analysis failed: {e}")
-
-    # Display results if available
-    if st.session_state.last_result:
-        result = st.session_state.last_result
-        st.markdown("---")
-        st.markdown('<div class="section-label">Examiner Scorecard</div>', unsafe_allow_html=True)
-
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        with kpi1:
-            st.metric("Overall Band", f"{result['overall']:.1f}")
-        with kpi2:
-            st.metric("Grammar", f"{result['grammar']:.1f}")
-        with kpi3:
-            st.metric("Vocabulary", f"{result['vocab']:.1f}")
-        with kpi4:
-            st.metric("Cohesion", f"{result['cohesion']:.1f}")
-
-        st.markdown("---")
-        st.markdown('<div class="section-label">Detailed Examiner Feedback</div>', unsafe_allow_html=True)
-
-        feedback_html = result["feedback"] if result["feedback"] else "_No feedback was returned. Please try again._"
-        st.markdown(
-            f"""
-            <div class="feedback-card">
-                {feedback_html.replace(chr(10), "<br>")}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.info("👆 Paste an essay above and click **Analyze Essay** to receive your band score breakdown.")
-
-
-# ------------------------------------------------------------------------
-# TAB 2: VOCABULARY UPGRADES
-# ------------------------------------------------------------------------
-with tab2:
-    st.markdown('<div class="section-label">Lexical Resource Upgrade Table</div>', unsafe_allow_html=True)
-    st.caption("Weak or repetitive words detected in your essay, mapped to Band 9.0-level alternatives with example usage.")
-
-    if st.session_state.last_result and st.session_state.last_result.get("upgrades"):
-        st.markdown(st.session_state.last_result["upgrades"])
-    else:
-        st.info("💡 Run an analysis in the **Essay Evaluation** tab to generate your personalized vocabulary upgrade table.")
-
-
-# ------------------------------------------------------------------------
-# TAB 3: SESSION HISTORY
-# ------------------------------------------------------------------------
-with tab3:
-    st.markdown('<div class="section-label">Your Session Progress</div>', unsafe_allow_html=True)
-
-    if not st.session_state.history:
-        st.info("📭 No submissions yet this session. Analyze an essay to start tracking your progress.")
-    else:
-        avg_score = sum(item["overall"] for item in st.session_state.history) / len(st.session_state.history)
-        best_score = max(item["overall"] for item in st.session_state.history)
-
-        stat1, stat2, stat3 = st.columns(3)
-        with stat1:
-            st.metric("Total Submissions", len(st.session_state.history))
-        with stat2:
-            st.metric("Average Band", f"{avg_score:.1f}")
-        with stat3:
-            st.metric("Best Band", f"{best_score:.1f}")
-
-        st.markdown("---")
-
-        for idx, item in enumerate(reversed(st.session_state.history), start=1):
-            st.markdown(
-                f"""
-                <div class="history-card">
-                    <div style="display:flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <div style="font-weight:700; color:#e6edf3;">{item['title']}</div>
-                            <div class="history-meta">{item['timestamp']} &nbsp;•&nbsp; Target: Band {item['target_band']}</div>
-                            <div class="history-meta">Grammar {item['grammar']:.1f} · Vocab {item['vocab']:.1f} · Cohesion {item['cohesion']:.1f}</div>
-                        </div>
-                        <div class="history-score">{item['overall']:.1f}</div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        st.markdown("---")
-        if st.button("🗑️ Clear History"):
-            st.session_state.history = []
-            st.rerun()
