@@ -10,7 +10,7 @@ from datetime import datetime
 
 # Pulling the key securely from Streamlit Secrets so GitHub never blocks your upload
 if "GEMINI_API_KEY" in st.secrets:
-    API_KEY = st.secrets["AQ.Ab8RN6KVfvChf13_QDVLp1P3OXvp_2E7h5w9rEcZv5WGoB0JOA"]
+    API_KEY = st.secrets["GEMINI_API_KEY"]
 else:
     API_KEY = "NOT_SET"
 
